@@ -1,0 +1,38 @@
+{
+  "USER1_ID": {
+    "categorias_despesa": [
+      "Alimentação",
+      "Transporte",
+      "Moradia",
+      "Saúde",
+      "Educação",
+      "Lazer",
+      "Outras Despesas"
+    ],
+    "categorias_receita": [
+      "Salário",
+      "Investimentos",
+      "Rendimentos",
+      "Outras Receitas"
+    ],
+    "regras_extras": "- Exemplo: Contém \"Netflix\" -> \"Lazer\"",
+    "prompt_template": "Analise este comprovante financeiro. Retorne estritamente um JSON válido com as chaves abaixo:\n1. \"data_hora\": Formato \"DD/MM/AAAA HH:MM\". Se não houver, use \"00/00/0000 00:00\".\n2. \"origem_destino\": Nome da contraparte da transação. ATENÇÃO: NUNCA retorne o nome do dono da conta ({nome_completo}). Se for despesa, é quem recebeu o pagamento. Se for receita, é quem enviou.\n3. \"categoria\": Escolha ESTRITAMENTE uma da lista abaixo.\n    - Se Despesa: {categorias_despesa}.\n    - Se Receita: {categorias_receita}.\n    Regras de Categorização Automática:\n    {regras_extras}\n4. \"forma_pagamento\": (Ex: \"PIX\", \"Cartão\").\n5. \"valor\": Apenas numérico POSITIVO, com vírgula (Ex: \"15,50\").\n6. \"tipo\": \"Despesa\" ou \"Receita\".\n7. \"natureza\": \"Fixo\" ou \"Variável\"."
+  },
+  "USER2_ID": {
+    "categorias_despesa": [
+      "Alimentação",
+      "Transporte",
+      "Moradia",
+      "Saúde",
+      "Educação",
+      "Outras Despesas"
+    ],
+    "categorias_receita": [
+      "Salário",
+      "Rendimentos",
+      "Outras Receitas"
+    ],
+    "regras_extras": "",
+    "prompt_template": "Analise este comprovante financeiro. Retorne estritamente um JSON válido com as chaves abaixo:\n1. \"data_hora\": Formato \"DD/MM/AAAA HH:MM\". Se não houver, use \"00/00/0000 00:00\".\n2. \"origem_destino\": Nome da contraparte da transação. ATENÇÃO: NUNCA retorne o nome do dono da conta ({nome_completo}). Se for despesa, é quem recebeu o pagamento. Se for receita, é quem enviou.\n3. \"categoria\": Escolha ESTRITAMENTE uma da lista abaixo.\n    - Se Despesa: {categorias_despesa}.\n    - Se Receita: {categorias_receita}.\n    Regras de Categorização Automática:\n    {regras_extras}\n4. \"forma_pagamento\": (Ex: \"PIX\", \"Cartão\").\n5. \"valor\": Apenas numérico POSITIVO, com vírgula (Ex: \"15,50\").\n6. \"tipo\": \"Despesa\" ou \"Receita\".\n7. \"natureza\": \"Fixo\" ou \"Variável\"."
+  }
+}

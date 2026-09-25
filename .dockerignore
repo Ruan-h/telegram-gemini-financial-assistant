@@ -1,0 +1,7 @@
+.venv
+__pycache__
+*.csv
+extrato.json
+.git
+.env
+

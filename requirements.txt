@@ -1,0 +1,6 @@
+boto3==1.43.98
+protobuf==7.36.2
+pyTelegramBotAPI==4.36.1
+Requests==2.34.2
+google-genai
+python-dotenv

@@ -1,0 +1,36 @@
+# Environment variables
+.env
+.env*.local
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python cache & compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Sensitive local data & banking extracts
+*.csv
+extrato.json
+perfis_usuarios.json
+!perfis_usuarios.example.json
+
+# Logs
+*.log
