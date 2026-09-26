@@ -8,6 +8,7 @@ import boto3
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from pydantic import BaseModel, Field
 import requests
 import telebot
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -33,6 +34,16 @@ if IS_LAMBDA:
     tabela = dynamodb.Table("TransacoesPendentes")
 else:
     tabela_mock = {}
+
+
+class TransactionSchema(BaseModel):
+    data_hora: str = Field(description="Data e hora no formato DD/MM/AAAA HH:MM ou data aproximada")
+    origem_destino: str = Field(description="Nome do estabelecimento, recebedor ou pagador")
+    categoria: str = Field(description="Categoria financeira estritamente escolhida da lista permitida")
+    forma_pagamento: str = Field(description="Forma de pagamento (PIX, Cartão de Crédito, Cartão de Débito, Dinheiro, etc.)")
+    valor: str = Field(description="Valor numérico positivo com vírgula (ex: '15,50')")
+    tipo: str = Field(description="'Despesa' ou 'Receita'")
+    natureza: str = Field(description="'Fixo' ou 'Variável'")
 
 
 def salvar_transacao_estado(id_transacao: str, chat_id: int, dados_extraidos: dict) -> None:
@@ -117,16 +128,17 @@ def get_user_config(user_id: int) -> dict:
         )
     else:
         prompt = (
-            f"Analise este comprovante financeiro. Retorne estritamente um JSON válido com as chaves abaixo:\n"
-            f'1. "data_hora": Formato "DD/MM/AAAA HH:MM". Se não houver, use "00/00/0000 00:00".\n'
-            f'2. "origem_destino": Nome da contraparte da transação. ATENÇÃO: NUNCA retorne o nome do dono da conta ({usuario["nome_completo"]}). Se for despesa, é quem recebeu o pagamento. Se for receita, é quem enviou.\n'
-            f'3. "categoria": Escolha ESTRITAMENTE uma da lista abaixo.\n'
+            f"Analise esta transação financeira (comprovante, mensagem de texto ou áudio). "
+            f"Retorne os dados estruturados de acordo com o esquema requerido:\n"
+            f'1. "data_hora": Data e hora no formato "DD/MM/AAAA HH:MM" ou data aproximada.\n'
+            f'2. "origem_destino": Nome da contraparte da transação. NUNCA use o nome do titular ({usuario["nome_completo"]}). Se despesa, quem recebeu. Se receita, quem pagou.\n'
+            f'3. "categoria": Escolha ESTRITAMENTE da lista permitida:\n'
             f'    - Se Despesa: {categorias_despesa_str}.\n'
             f'    - Se Receita: {categorias_receita_str}.\n'
             f"    Regras de Categorização Automática:\n"
             f"    {regras_extras}\n"
-            f'4. "forma_pagamento": (Ex: "PIX", "Cartão").\n'
-            f'5. "valor": Apenas numérico POSITIVO, com vírgula (Ex: "15,50").\n'
+            f'4. "forma_pagamento": PIX, Cartão de Crédito, Cartão de Débito, Dinheiro, etc.\n'
+            f'5. "valor": Apenas numérico positivo com vírgula (ex: "15,50").\n'
             f'6. "tipo": "Despesa" ou "Receita".\n'
             f'7. "natureza": "Fixo" ou "Variável".'
         )
@@ -136,10 +148,6 @@ def get_user_config(user_id: int) -> dict:
         "categorias_receita": categorias_receita,
         "prompt": prompt,
     }
-
-
-def limpar_json_gemini(texto: str) -> str:
-    return texto.replace("```json", "").replace("```", "").strip()
 
 
 def disparar_webhook(dados: dict, url_planilha: str) -> None:
@@ -163,25 +171,10 @@ def disparar_webhook(dados: dict, url_planilha: str) -> None:
     requests.post(url_planilha, json=payload, timeout=10)
 
 
-@bot.message_handler(commands=["start"])
-def send_welcome(message):
+def processar_entrada_usuario(message, tipo_entrada: str) -> None:
     chat_id = message.chat.id
     if chat_id not in USUARIOS_AUTORIZADOS:
-        bot.reply_to(message, "⛔ Acesso Negado. Você não tem permissão para usar este sistema.")
-        return
-
-    usuario = USUARIOS_AUTORIZADOS[chat_id]
-    bot.reply_to(
-        message,
-        f"Fala {usuario['nome']}! 🤖 Pode mandar comprovantes em Imagem ou PDF que eu processo e lanço na sua planilha.",
-    )
-
-
-@bot.message_handler(content_types=["photo", "document"])
-def processar_arquivo(message):
-    chat_id = message.chat.id
-    if chat_id not in USUARIOS_AUTORIZADOS:
-        bot.reply_to(message, "⛔ Acesso Negado.")
+        bot.reply_to(message, "⛔ Acesso Negado. Você não tem autorização para usar este bot.")
         return
 
     usuario = USUARIOS_AUTORIZADOS[chat_id]
@@ -190,28 +183,40 @@ def processar_arquivo(message):
         bot.reply_to(message, "⛔ Configurações de perfil do usuário não encontradas.")
         return
 
-    msg_status = bot.reply_to(message, "⏳ Baixando comprovante...")
+    msg_status = bot.reply_to(message, "⏳ Processando transação...")
 
     try:
-        if message.content_type == "photo":
-            file_id = message.photo[-1].file_id
-            mime_type = "image/jpeg"
+        contents = [user_config["prompt"]]
+
+        if tipo_entrada == "text":
+            contents.append(f"Entrada informada pelo usuário em texto: {message.text}")
         else:
-            file_id = message.document.file_id
-            mime_type = message.document.mime_type
+            if tipo_entrada == "photo":
+                file_id = message.photo[-1].file_id
+                mime_type = "image/jpeg"
+            elif tipo_entrada == "voice":
+                file_id = message.voice.file_id
+                mime_type = getattr(message.voice, "mime_type", None) or "audio/ogg"
+            elif tipo_entrada == "audio":
+                file_id = message.audio.file_id
+                mime_type = getattr(message.audio, "mime_type", None) or "audio/mp3"
+            elif tipo_entrada == "document":
+                file_id = message.document.file_id
+                mime_type = getattr(message.document, "mime_type", None) or "application/pdf"
+            else:
+                raise ValueError(f"Tipo de entrada não suportado: {tipo_entrada}")
 
-        file_info = bot.get_file(file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
-
-        prompt = user_config["prompt"]
+            file_info = bot.get_file(file_id)
+            downloaded_file = bot.download_file(file_info.file_path)
+            contents.append(types.Part.from_bytes(data=downloaded_file, mime_type=mime_type))
 
         modelos_disponiveis = [
-            "gemini-3.8-flash",
             "gemini-3.7-flash",
+            "gemini-3.8-flash",
             "gemini-3.6-flash",
             "gemini-3.5-flash",
             "gemini-3.1-flash-lite",
-            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
         ]
         response = None
 
@@ -221,12 +226,15 @@ def processar_arquivo(message):
                     bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=msg_status.message_id,
-                        text=f"⏳ Lendo com {modelo}...",
+                        text=f"⏳ Analisando com {modelo}...",
                     )
                     response = client.models.generate_content(
                         model=modelo,
-                        contents=[types.Part.from_bytes(data=downloaded_file, mime_type=mime_type), prompt],
-                        config=types.GenerateContentConfig(response_mime_type="application/json"),
+                        contents=contents,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=TransactionSchema,
+                        ),
                     )
                     break
                 except Exception as e:
@@ -236,12 +244,13 @@ def processar_arquivo(message):
                     raise e
             if response:
                 break
-            time.sleep(3)
+            time.sleep(2)
 
         if not response:
             raise RuntimeError("Serviços de IA temporariamente indisponíveis. Tente novamente.")
 
-        dados_extraidos = json.loads(limpar_json_gemini(response.text))
+        transacao = TransactionSchema.model_validate_json(response.text)
+        dados_extraidos = transacao.model_dump()
         id_transacao = str(msg_status.message_id)
 
         salvar_transacao_estado(id_transacao, chat_id, dados_extraidos)
@@ -270,12 +279,15 @@ def processar_arquivo(message):
         ]
         markup.add(*botoes)
 
+        emoji_tipo = "💸" if tipo == "Despesa" else "💰"
         resumo = (
-            f"📄 **Resumo:**\n"
+            f"📄 **Resumo da Transação:**\n"
             f"👤 **Origem/Destino:** {dados_extraidos.get('origem_destino')}\n"
-            f"💰 **Valor:** R$ {dados_extraidos.get('valor')}\n"
-            f"🔄 **Tipo:** {tipo}\n\n"
-            f"🤖 *Selecione a categoria correta para gravar na planilha:*"
+            f"💵 **Valor:** R$ {dados_extraidos.get('valor')}\n"
+            f"💳 **Pagamento:** {dados_extraidos.get('forma_pagamento')}\n"
+            f"{emoji_tipo} **Tipo:** {tipo}\n"
+            f"📅 **Data:** {dados_extraidos.get('data_hora')}\n\n"
+            f"🤖 *Selecione a categoria para confirmar e gravar na planilha:*"
         )
         bot.edit_message_text(
             chat_id=chat_id,
@@ -286,8 +298,54 @@ def processar_arquivo(message):
         )
 
     except Exception as e:
-        logger.error(f"Erro ao processar arquivo: {e}", exc_info=True)
+        logger.error(f"Erro ao processar {tipo_entrada}: {e}", exc_info=True)
         bot.edit_message_text(chat_id=chat_id, message_id=msg_status.message_id, text=f"❌ Erro: {e}")
+
+
+@bot.message_handler(commands=["start"])
+def send_welcome(message):
+    chat_id = message.chat.id
+    if chat_id not in USUARIOS_AUTORIZADOS:
+        bot.reply_to(message, "⛔ Acesso Negado. Você não tem permissão para usar este sistema.")
+        return
+
+    usuario = USUARIOS_AUTORIZADOS[chat_id]
+    bot.reply_to(
+        message,
+        f"Fala {usuario['nome']}! 🤖\n\n"
+        "Você pode registrar transações de 4 formas diferentes:\n"
+        "📸 **Foto** de cupom/recibo\n"
+        "📄 **PDF** de comprovante bancário\n"
+        "🎙️ **Áudio de voz** (ex: *'Gastei 35 reais no almoço no débito'*)\n"
+        "💬 **Texto livre** (ex: *'padaria 14,50 pix'*)\n\n"
+        "Eu analiso tudo com IA e lanço direto na sua planilha após sua confirmação!",
+        parse_mode="Markdown",
+    )
+
+
+@bot.message_handler(content_types=["photo"])
+def handle_photo(message):
+    processar_entrada_usuario(message, tipo_entrada="photo")
+
+
+@bot.message_handler(content_types=["document"])
+def handle_document(message):
+    processar_entrada_usuario(message, tipo_entrada="document")
+
+
+@bot.message_handler(content_types=["voice"])
+def handle_voice(message):
+    processar_entrada_usuario(message, tipo_entrada="voice")
+
+
+@bot.message_handler(content_types=["audio"])
+def handle_audio(message):
+    processar_entrada_usuario(message, tipo_entrada="audio")
+
+
+@bot.message_handler(func=lambda msg: not msg.text.startswith("/"), content_types=["text"])
+def handle_text(message):
+    processar_entrada_usuario(message, tipo_entrada="text")
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("save_"))
